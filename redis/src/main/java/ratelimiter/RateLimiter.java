@@ -4,6 +4,8 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.time.Instant;
+import java.util.Optional;
+
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 
@@ -22,8 +24,66 @@ public class RateLimiter {
   }
 
   public boolean pass() {
-    // TODO: Implementation
-    return false;
+    String key = label;
+    Long currentTokens = getCurrentTokens(key).orElse(-1l);
+    Long lastTime = peekLastTime(key).orElse(-1l);
+    if (currentTokens == -1 || lastTime == -1) {
+      return initializeBucket(key);
+    }
+
+    while ((System.currentTimeMillis() - lastTime) / 1000 >= timeWindowSeconds) {
+      popLastTime(key);
+      lastTime = peekLastTime(key).orElse(System.currentTimeMillis());
+      
+      currentTokens++;
+    }
+
+    currentTokens = Math.min(currentTokens, maxRequestCount);
+
+    if (currentTokens >= 1) {
+      updateTokenCount(key, currentTokens - 1);
+      addlastTime(key, System.currentTimeMillis());
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  public Optional<Long> getCurrentTokens(String key) {
+    String tokens = redis.get("tokens:" + key);
+    return tokens == null ? Optional.ofNullable(null) : Optional.of(Long.parseLong(tokens));
+  }
+
+  public Optional<Long> popLastTime(String key) {
+    String lastTime = redis.lpop("last-time:" + key);
+    return lastTime == null ? Optional.ofNullable(null) : Optional.of(Long.parseLong(lastTime));
+  }
+
+  public Optional<Long> peekLastTime(String key) {
+    String lastTime = redis.lindex("last-time:" + key, 0);
+    return lastTime == null ? Optional.ofNullable(null) : Optional.of(Long.parseLong(lastTime));
+  }
+
+  public boolean initializeBucket(String key) {
+    long tokens = maxRequestCount - 1;
+    long lastTime = System.currentTimeMillis();
+
+    if (tokens < 0) {
+      return false;
+    }
+
+    updateTokenCount(key, tokens);
+    addlastTime(key, lastTime);
+
+    return true;
+  }
+
+  public void updateTokenCount(String key, long tokensCount) {
+    redis.set("tokens:" + key, Long.toString(tokensCount));
+  }
+
+  public void addlastTime(String key, long lastTime) {
+    redis.rpush("last-time:" + key, Long.toString(lastTime));
   }
 
   public static void main(String[] args) {
