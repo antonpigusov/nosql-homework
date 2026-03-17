@@ -6,11 +6,11 @@ CREATE TABLE IF NOT EXISTS server_logs
 (
     timestamp DateTime,
     user_id UInt64,
-    endpoint FixedString(25),
+    endpoint String,
     response_time_ms UInt64,
     status_code UInt16
 ) ENGINE = MergeTree()
-ORDER BY (endpoint, timestamp); -- TODO: выберите подходящий порядок сортировки
+ORDER BY (timestamp, endpoint); -- TODO: выберите подходящий порядок сортировки
 
 -- 2. Загрузка данных из CSV
 -- Подсказка: можно использовать clickhouse-client с параметром --query
@@ -21,7 +21,7 @@ ORDER BY (endpoint, timestamp); -- TODO: выберите подходящий �
 -- 3. Запрос: Топ-5 самых медленных endpoint'ов (по среднему времени ответа)
 -- TODO: напишите SELECT запрос
 SELECT endpoint, avg(response_time_ms) AS avg_response_time
-FROM server_logs GROUP BY endpoint ORDER BY avg_response_time LIMIT 5;
+FROM server_logs GROUP BY endpoint ORDER BY avg_response_time DESC LIMIT 5;
 
 -- 4. Запрос: Количество запросов по часам за весь период в логах
 -- TODO: напишите SELECT запрос с использованием функции toHour() или formatDateTime()

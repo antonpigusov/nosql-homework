@@ -3,7 +3,7 @@
 CREATE KEYSPACE solution
 WITH replication = {
     'class': 'SimpleStrategy',
-    'replication_factor': 3
+    'replication_factor': 1
 };
 
 CREATE TABLE posts_user_id (
@@ -13,8 +13,8 @@ CREATE TABLE posts_user_id (
     content text,
     username text,
     created_at timestamp,
-    PRIMARY KEY (user_id, created_at, post_id)
-) WITH CLUSTERING ORDER BY (created_at DESC, post_id ASC);
+    PRIMARY KEY (user_id, created_at)
+) WITH CLUSTERING ORDER BY (created_at DESC);
 
 
 CREATE TABLE posts_topic_id (

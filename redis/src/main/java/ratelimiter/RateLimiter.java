@@ -4,7 +4,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.time.Instant;
-import java.util.Optional;
 
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
@@ -25,43 +24,47 @@ public class RateLimiter {
 
   public boolean pass() {
     String key = label;
-    Long currentTokens = getCurrentTokens(key).orElse(-1l);
-    Long lastTime = peekLastTime(key).orElse(-1l);
-    if (currentTokens == -1 || lastTime == -1) {
+    if (!redis.exists(key) || !redis.type(key).equals("list")) {
       return initializeBucket(key);
     }
 
-    while ((System.currentTimeMillis() - lastTime) / 1000 >= timeWindowSeconds) {
-      popLastTime(key);
-      lastTime = peekLastTime(key).orElse(System.currentTimeMillis());
-      
-      currentTokens++;
-    }
-
-    currentTokens = Math.min(currentTokens, maxRequestCount);
+    Long currentTokens = clearListLastTime(key);
 
     if (currentTokens >= 1) {
-      updateTokenCount(key, currentTokens - 1);
-      addlastTime(key, System.currentTimeMillis());
+      addLastTime(key, System.currentTimeMillis());
       return true;
     } else {
       return false;
     }
   }
 
-  public Optional<Long> getCurrentTokens(String key) {
-    String tokens = redis.get("tokens:" + key);
-    return tokens == null ? Optional.ofNullable(null) : Optional.of(Long.parseLong(tokens));
+  public Long clearListLastTime(String key) {
+    long currentTokens = getCurrentTokens(key);
+    long lefti = 0;
+    long righti = redis.llen(key) - 1;
+    
+    long midi;
+    long now = System.currentTimeMillis();
+
+    while (lefti < righti) {
+      midi = (righti - lefti) / 2 + lefti + 1;
+      if (now - Long.parseLong(redis.lindex(key, midi)) > timeWindowSeconds * 1000) {
+        lefti = midi;
+      } else {
+        righti = midi - 1;
+      }
+    }
+
+    if (now - Long.parseLong(redis.lindex(key, lefti)) > timeWindowSeconds * 1000) {
+      // даже если индексы выйдут за границу, то список всеравно останется пустым, поэтому проверку не делаю на то, что такого индекса нет
+      redis.ltrim(key, lefti + 1, -1);
+      return currentTokens + lefti + 1;
+    }
+    return currentTokens;
   }
 
-  public Optional<Long> popLastTime(String key) {
-    String lastTime = redis.lpop("last-time:" + key);
-    return lastTime == null ? Optional.ofNullable(null) : Optional.of(Long.parseLong(lastTime));
-  }
-
-  public Optional<Long> peekLastTime(String key) {
-    String lastTime = redis.lindex("last-time:" + key, 0);
-    return lastTime == null ? Optional.ofNullable(null) : Optional.of(Long.parseLong(lastTime));
+  public Long getCurrentTokens(String key) {
+    return maxRequestCount - redis.llen(key);
   }
 
   public boolean initializeBucket(String key) {
@@ -72,18 +75,13 @@ public class RateLimiter {
       return false;
     }
 
-    updateTokenCount(key, tokens);
-    addlastTime(key, lastTime);
+    addLastTime(key, lastTime);
 
     return true;
   }
 
-  public void updateTokenCount(String key, long tokensCount) {
-    redis.set("tokens:" + key, Long.toString(tokensCount));
-  }
-
-  public void addlastTime(String key, long lastTime) {
-    redis.rpush("last-time:" + key, Long.toString(lastTime));
+  public void addLastTime(String key, long lastTime) {
+    redis.rpush(key, Long.toString(lastTime));
   }
 
   public static void main(String[] args) {
