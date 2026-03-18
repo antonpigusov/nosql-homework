@@ -6,6 +6,8 @@ WITH replication = {
     'replication_factor': 1
 };
 
+-- Я использую post_id чтобы посты, которые были созданы в одно время хранились, ибо если не указать post_id, то
+-- посты, созданные в одинаковое время, не будут дублироваться, а просто перезапишутся данные
 CREATE TABLE posts_user_id (
     post_id int,
     user_id int,
@@ -13,7 +15,7 @@ CREATE TABLE posts_user_id (
     content text,
     username text,
     created_at timestamp,
-    PRIMARY KEY (user_id, created_at)
+    PRIMARY KEY (user_id, created_at, post_id)
 ) WITH CLUSTERING ORDER BY (created_at DESC);
 
 

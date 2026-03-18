@@ -8,6 +8,17 @@ import java.time.Instant;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 
+// Почему использовал такой алгоритм реализации RateLimiter:
+// 1) Данный алгоритм позваоляет не хранить данные по поводу входа как в скользящем журнале, а удаляет их
+//  не засоряя память, кроме того поиск для удаления и само удаление выполняются за O(logN + M)
+//  что сопоставимо например с использованием sorted set и score в качестве времени, так как там тоже исползуется O(logN + M) для нахождения и удаления.
+//  Однако при использовании sorted set реализация все таки будет быстрее на больших объемах данных чем мой со списком, однако в случаи RateLimiter
+//  это не критично (например, 1000 запросов в минуту что с list что с sorted set не имеет большой разницы)
+// 2) При использовании sorted set необходимо добавить что-то типо реализации генерации id в members для уникальности элементов,
+//  ибо просто дублировать текущее время в score и members нельзя так как в одно и то же время может попасть несколько запросов
+//  а дубликаты не запигутся и один запрос может не засчитаться
+// 3) в общем мой алгоритм справляется с проблемами других алгоритмов как например дорогое хранение всех меток в скользящем журнале
+// и отсутствием большой нагрузки на границах, так как кол-во токенов считается не по промежуткам а относительно текущего времени
 public class RateLimiter {
 
   private final Jedis redis;
@@ -28,37 +39,37 @@ public class RateLimiter {
       return initializeBucket(key);
     }
 
-    Long currentTokens = clearListLastTime(key);
+    Long currentTokens = clearStaleRequest(key);
 
     if (currentTokens >= 1) {
-      addLastTime(key, System.currentTimeMillis());
+      addRequestTime(key, System.currentTimeMillis());
       return true;
     } else {
       return false;
     }
   }
 
-  public Long clearListLastTime(String key) {
-    long currentTokens = getCurrentTokens(key);
-    long lefti = 0;
-    long righti = redis.llen(key) - 1;
+  public Long clearStaleRequest(String key) {
+    long leftBound = 0;
+    long rightBound = redis.llen(key) - 1;
     
-    long midi;
+    long mid;
     long now = System.currentTimeMillis();
 
-    while (lefti < righti) {
-      midi = (righti - lefti) / 2 + lefti + 1;
-      if (now - Long.parseLong(redis.lindex(key, midi)) > timeWindowSeconds * 1000) {
-        lefti = midi;
+    while (leftBound < rightBound) {
+      mid = (rightBound - leftBound) / 2 + leftBound + 1;
+      if (now - Long.parseLong(redis.lindex(key, mid)) > timeWindowSeconds * 1000) {
+        leftBound = mid;
       } else {
-        righti = midi - 1;
+        rightBound = mid - 1;
       }
     }
 
-    if (now - Long.parseLong(redis.lindex(key, lefti)) > timeWindowSeconds * 1000) {
+    long currentTokens = getCurrentTokens(key);
+    if (now - Long.parseLong(redis.lindex(key, leftBound)) > timeWindowSeconds * 1000) {
       // даже если индексы выйдут за границу, то список всеравно останется пустым, поэтому проверку не делаю на то, что такого индекса нет
-      redis.ltrim(key, lefti + 1, -1);
-      return currentTokens + lefti + 1;
+      redis.ltrim(key, leftBound + 1, -1);
+      return currentTokens + leftBound + 1;
     }
     return currentTokens;
   }
@@ -68,19 +79,16 @@ public class RateLimiter {
   }
 
   public boolean initializeBucket(String key) {
-    long tokens = maxRequestCount - 1;
-    long lastTime = System.currentTimeMillis();
-
-    if (tokens < 0) {
+    if (maxRequestCount - 1 < 0) {
       return false;
     }
 
-    addLastTime(key, lastTime);
+    addRequestTime(key, System.currentTimeMillis());
 
     return true;
   }
 
-  public void addLastTime(String key, long lastTime) {
+  public void addRequestTime(String key, long lastTime) {
     redis.rpush(key, Long.toString(lastTime));
   }
 
