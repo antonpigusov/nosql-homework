@@ -22,8 +22,19 @@ public class RateLimiter {
   }
 
   public boolean pass() {
-    // TODO: Implementation
-    return false;
+    long now = Instant.now().toEpochMilli();
+    long windowStart = now - (timeWindowSeconds * 1000);
+    redis.zremrangeByScore(label, 0, windowStart);
+    long count = redis.zcard(label);
+    if (count < maxRequestCount) {
+      String uniqueMember = now + ":" + java.util.UUID.randomUUID().toString();
+      redis.zadd(label, (double) now, uniqueMember);
+      redis.expire(label, timeWindowSeconds);
+      return true;
+    }
+    else {
+      return false;
+    }
   }
 
   public static void main(String[] args) {
