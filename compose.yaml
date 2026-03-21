@@ -1,0 +1,86 @@
+# Comments are provided throughout this file to help you get started.
+# If you need more help, visit the Docker Compose reference guide at
+# https://docs.docker.com/go/compose-spec-reference/
+
+# Here the instructions define your application as a service called "server".
+# This service is built from the Dockerfile in the current directory.
+# You can add other services your application may depend on here, such as a
+# database or a cache. For examples, see the Awesome Compose repository:
+# https://github.com/docker/awesome-compose
+services:
+
+  redis:
+    image: redis:8.2.1
+    container_name: redis
+    environment:
+      - REDIS_USER_PASSWORD=admin
+      - TZ=Europe/Moscow
+    ports:
+      - "6380:6379"
+    volumes:
+      - ./volumes/redis:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: 1
+    networks:
+      - hh_net
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.9
+    container_name: clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    environment:
+      - CLICKHOUSE_USER=admin
+      - CLICKHOUSE_PASSWORD=admin
+      - TZ=Europe/Moscow
+    ports:
+      - "8123:8123"    # http
+      - "9090:9000"    # native
+    volumes:
+      - ./volumes/clickhouse/data:/var/lib/clickhouse
+      - ./volumes/clickhouse/logs:/var/log/clickhouse-server
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: 1
+    networks:
+      - hh_net
+
+  scylla:
+    image: scylladb/scylla:5.4
+    container_name: scylla
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    environment:
+      - SCYLLA_OPTS=--developer-mode 1
+      - TZ=Europe/Moscow
+    ports:
+      - "9042:9042"   # CQL
+      - "10000:10000" # REST API
+    volumes:
+      - ./volumes/scylla:/var/lib/scylla
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: 1
+    networks:
+      - hh_net
+
+networks:
+  hh_net:
+    driver: bridge

@@ -4,6 +4,10 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.UUID;
+
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 
@@ -22,12 +26,25 @@ public class RateLimiter {
   }
 
   public boolean pass() {
-    // TODO: Implementation
-    return false;
+    String script = ScriptLoader.load("redis/SlidingWindow.lua");
+
+    long now = System.currentTimeMillis();
+    String requestId = UUID.randomUUID().toString();
+
+    Object result = redis.eval(script,
+        Collections.singletonList(label),
+        Arrays.asList(String.valueOf(now),
+              String.valueOf(timeWindowSeconds * 1000),
+              String.valueOf(maxRequestCount),
+              requestId
+        )
+    );
+
+    return Long.valueOf(1L).equals(result);
   }
 
   public static void main(String[] args) {
-    JedisPool pool = new JedisPool("localhost", 6379);
+    JedisPool pool = new JedisPool("localhost", 6380);
 
     try (Jedis redis = pool.getResource()) {
       RateLimiter rateLimiter = new RateLimiter(redis, "pr_rate", 1, 1);
@@ -52,7 +69,8 @@ public class RateLimiter {
             System.out.printf("%d ms: %s", now - prev, "limited");
           }
         } catch (IOException e) {
-          e.printStackTrace();
+          System.out.println(e.getMessage());
+          pool.close();
         }
       }
 
